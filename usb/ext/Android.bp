@@ -1,0 +1,23 @@
+aidl_interface {
+    name: "android.hardware.usb.ext",
+    owner: "grapheneos",
+    vendor_available: true,
+    srcs: ["android/hardware/usb/ext/*.aidl"],
+    stability: "vintf",
+    backend: {
+        cpp: {
+            enabled: false,
+        },
+        java: {
+            platform_apis: true,
+            sdk_version: "module_current",
+        },
+    },
+    versions_with_info: [
+        {
+            version: "1",
+            imports: [],
+        },
+    ],
+    frozen: true,
+}
