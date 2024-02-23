@@ -49,6 +49,7 @@ bool ShouldCheckMissingHidlHalsInFcm(const std::string& packageAndVersion) {
             "android.hardware.media.bufferpool@1.0",
             "android.hardware.media.bufferpool@2.0",
             "android.hardware.radio.config@1.2",
+            "android.hardware.usb.ext",
 
             // Fastboot HAL is only used by recovery. Recovery is owned by OEM. Framework
             // does not depend on this HAL, hence it is not declared in any manifests or matrices.
