@@ -62,6 +62,8 @@ static const char* const kDrmErrorInvalidState = "invalidState";
 static const char* const kDrmErrorResourceContention = "resourceContention";
 static constexpr SecurityLevel kSwSecureCrypto = SecurityLevel::SW_SECURE_CRYPTO;
 static constexpr SecurityLevel kHwSecureAll = SecurityLevel::HW_SECURE_ALL;
+static_assert(static_cast<int32_t>(Status::ERROR_DRM_CANNOT_HANDLE) == 4,
+              "libbinder_ndk denial status must match the stable DRM AIDL enum");
 
 /**
  * Ensure drm factory supports module UUID Scheme
