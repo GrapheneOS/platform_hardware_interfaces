@@ -1,3 +1,4 @@
 service vendor.threadnetwork_hal /apex/com.android.hardware.threadnetwork/bin/hw/android.hardware.threadnetwork-service
     class hal
     user thread_network
+    group root inet
