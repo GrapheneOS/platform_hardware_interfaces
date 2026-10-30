@@ -179,9 +179,12 @@ void BufferPool::Invalidation::onHandleAck(
 bool BufferPool::handleOwnBuffer(
         ConnectionId connectionId, BufferId bufferId) {
 
+    auto iter = mBuffers.find(bufferId);
+    if (iter == mBuffers.end()) {
+        return false;
+    }
     bool added = insert(&mUsingBuffers, connectionId, bufferId);
     if (added) {
-        auto iter = mBuffers.find(bufferId);
         iter->second->mOwnerCount++;
     }
     insert(&mUsingConnections, bufferId, connectionId);
@@ -190,9 +193,12 @@ bool BufferPool::handleOwnBuffer(
 
 bool BufferPool::handleReleaseBuffer(
         ConnectionId connectionId, BufferId bufferId) {
+    auto iter = mBuffers.find(bufferId);
+    if (iter == mBuffers.end()) {
+        return false;
+    }
     bool deleted = erase(&mUsingBuffers, connectionId, bufferId);
     if (deleted) {
-        auto iter = mBuffers.find(bufferId);
         iter->second->mOwnerCount--;
         if (iter->second->mOwnerCount == 0 &&
                 iter->second->mTransactionCount == 0) {
@@ -252,6 +258,10 @@ bool BufferPool::handleTransferTo(const BufferStatusMessage &message) {
 bool BufferPool::handleTransferFrom(const BufferStatusMessage &message) {
     auto found = mTransactions.find(message.transactionId);
     if (found == mTransactions.end()) {
+        auto bufferIter = mBuffers.find(message.bufferId);
+        if (bufferIter == mBuffers.end()) {
+            return false;
+        }
         // TODO: is it feasible to check ownership here?
         mStats.onBufferSent();
         mTransactions.insert(std::make_pair(
@@ -259,9 +269,11 @@ bool BufferPool::handleTransferFrom(const BufferStatusMessage &message) {
                 std::make_unique<TransactionStatus>(message, mTimestampMs)));
         insert(&mPendingTransactions, message.connectionId,
                FromAidl(message.transactionId));
-        auto bufferIter = mBuffers.find(message.bufferId);
         bufferIter->second->mTransactionCount++;
     } else {
+        if (message.bufferId != found->second->mBufferId) {
+            return false;
+        }
         if (message.connectionId == found->second->mReceiver) {
             found->second->mStatus = BufferStatus::TRANSFER_FROM;
         }
@@ -272,13 +284,20 @@ bool BufferPool::handleTransferFrom(const BufferStatusMessage &message) {
 bool BufferPool::handleTransferResult(const BufferStatusMessage &message) {
     auto found = mTransactions.find(message.transactionId);
     if (found != mTransactions.end()) {
+        if (message.bufferId != found->second->mBufferId) {
+            return false;
+        }
         bool deleted = erase(&mPendingTransactions, message.connectionId,
                              FromAidl(message.transactionId));
         if (deleted) {
+            auto bufferIter = mBuffers.find(message.bufferId);
+            if (bufferIter == mBuffers.end()) {
+                mTransactions.erase(found);
+                return false;
+            }
             if (!found->second->mSenderValidated) {
                 mCompletedTransactions.insert(message.transactionId);
             }
-            auto bufferIter = mBuffers.find(message.bufferId);
             if (message.status == BufferStatus::TRANSFER_OK) {
                 handleOwnBuffer(message.connectionId, message.bufferId);
             }
@@ -360,18 +379,20 @@ bool BufferPool::handleClose(ConnectionId connectionId) {
             bool deleted = erase(&mUsingConnections, bufferId, connectionId);
             if (deleted) {
                 auto bufferIter = mBuffers.find(bufferId);
-                bufferIter->second->mOwnerCount--;
-                if (bufferIter->second->mOwnerCount == 0 &&
-                        bufferIter->second->mTransactionCount == 0) {
-                    // TODO: handle freebuffer insert fail
-                    if (!bufferIter->second->mInvalidated) {
-                        mStats.onBufferUnused(bufferIter->second->mAllocSize);
-                        mFreeBuffers.insert(bufferId);
-                    } else {
-                        mStats.onBufferUnused(bufferIter->second->mAllocSize);
-                        mStats.onBufferEvicted(bufferIter->second->mAllocSize);
-                        mBuffers.erase(bufferIter);
-                        mInvalidation.onBufferInvalidated(bufferId, mInvalidationChannel);
+                if (bufferIter != mBuffers.end()) {
+                    bufferIter->second->mOwnerCount--;
+                    if (bufferIter->second->mOwnerCount == 0 &&
+                            bufferIter->second->mTransactionCount == 0) {
+                        // TODO: handle freebuffer insert fail
+                        if (!bufferIter->second->mInvalidated) {
+                            mStats.onBufferUnused(bufferIter->second->mAllocSize);
+                            mFreeBuffers.insert(bufferId);
+                        } else {
+                            mStats.onBufferUnused(bufferIter->second->mAllocSize);
+                            mStats.onBufferEvicted(bufferIter->second->mAllocSize);
+                            mBuffers.erase(bufferIter);
+                            mInvalidation.onBufferInvalidated(bufferId, mInvalidationChannel);
+                        }
                     }
                 }
             }
@@ -390,18 +411,20 @@ bool BufferPool::handleClose(ConnectionId connectionId) {
                 }
                 BufferId bufferId = iter->second->mBufferId;
                 auto bufferIter = mBuffers.find(bufferId);
-                bufferIter->second->mTransactionCount--;
-                if (bufferIter->second->mOwnerCount == 0 &&
-                    bufferIter->second->mTransactionCount == 0) {
-                    // TODO: handle freebuffer insert fail
-                    if (!bufferIter->second->mInvalidated) {
-                        mStats.onBufferUnused(bufferIter->second->mAllocSize);
-                        mFreeBuffers.insert(bufferId);
-                    } else {
-                        mStats.onBufferUnused(bufferIter->second->mAllocSize);
-                        mStats.onBufferEvicted(bufferIter->second->mAllocSize);
-                        mBuffers.erase(bufferIter);
-                        mInvalidation.onBufferInvalidated(bufferId, mInvalidationChannel);
+                if (bufferIter != mBuffers.end()) {
+                    bufferIter->second->mTransactionCount--;
+                    if (bufferIter->second->mOwnerCount == 0 &&
+                        bufferIter->second->mTransactionCount == 0) {
+                        // TODO: handle freebuffer insert fail
+                        if (!bufferIter->second->mInvalidated) {
+                            mStats.onBufferUnused(bufferIter->second->mAllocSize);
+                            mFreeBuffers.insert(bufferId);
+                        } else {
+                            mStats.onBufferUnused(bufferIter->second->mAllocSize);
+                            mStats.onBufferEvicted(bufferIter->second->mAllocSize);
+                            mBuffers.erase(bufferIter);
+                            mInvalidation.onBufferInvalidated(bufferId, mInvalidationChannel);
+                        }
                     }
                 }
                 mTransactions.erase(iter);
